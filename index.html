@@ -169,7 +169,7 @@ function section(s){const c=S[s];let tabs='';
 if(s=='members')tabs=`<div class="tabs">${db.parties.map((p,i)=>`<button class="${p==party?'g':'o'}" onclick="setParty(${i})">${esc(p)}</button>`).join('')}<button class="o" onclick="addParty()">+ New Party</button>${isCustom(party)?`<button class="d" onclick="removeParty()">🗑 Remove ${esc(party)}</button>`:''}</div>`;
 const rows=db[s].filter(r=>s!='members'||r.party==party);
 $('m').innerHTML=`<div class="card"><h2>${c.title}${s=='members'?' — '+esc(party):''}</h2>${tabs}<div class="form">${c.f.map(f=>`<div class="${f[2]=='ta'?'wide':''}"><label>${f[1]}</label>${inp(f)}</div>`).join('')}<div><label>Date &amp; Time of Information</label><input type="datetime-local" id="f_infoDate" value="${nowLocal()}"></div></div><div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="g" onclick="add('${s}')">💾 Save</button><button onclick="upload('${s}')">☁️ Upload to Drive</button></div></div>
-<div class="card"><h2>Saved Records (${rows.length})</h2><div class="tw"><table><tr><th>#</th>${c.f.map(f=>`<th>${f[1]}</th>`).join('')}<th>Info Date</th><th>Saved On</th><th>Drive</th><th></th></tr>${rows.map((r,i)=>`<tr><td class="num" data-label="#">${i+1}</td>${c.f.map(f=>`<td class="${f[0]=='name'?'nm':f[0]=='role'?'chip':f[0]=='active'?'act '+(r.active=='Active'?'on':'off'):(f[0]=='address'||f[0]=='desc')?'wide':''}" data-label="${f[1]}">${esc(r[f[0]])}</td>`).join('')}<td class="ts meta" data-label="Info Date">${esc((r.infoDate||'').replace('T',' '))}</td><td class="ts meta" data-label="Saved On">${esc(r.at)}</td><td class="ts drv" data-label="Drive">${esc(r.sync||'Saved')}</td><td class="del" data-label=""><button class="d" onclick="del('${s}','${r.id}')">✕</button></td></tr>`).join('')||`<tr><td colspan="${c.f.length+5}" class="ts">No records yet.</td></tr>`}</table></div></div>`}
+<div class="card"><h2>Saved Records (${rows.length})</h2><div class="tw"><table><tr><th>#</th>${c.f.map(f=>`<th>${f[1]}</th>`).join('')}<th>Info Date</th><th>Saved On</th><th>Drive</th><th></th></tr>${rows.map((r,i)=>`<tr><td class="num" data-label="#">${i+1}</td>${c.f.map(f=>`<td class="${f[0]=='name'?'nm':f[0]=='role'?'chip':f[0]=='active'?'act '+(r.active=='Active'?'on':'off'):(f[0]=='address'||f[0]=='desc')?'wide':''}" data-label="${f[1]}">${esc(r[f[0]])}</td>`).join('')}<td class="ts meta" data-label="Info Date">${esc((r.infoDate||'').replace('T',' '))}</td><td class="ts meta" data-label="Saved On">${esc(r.at)}</td><td class="ts drv" data-label="Drive">${esc(r.sync||'Saved')}${r.driveAt?' • '+esc(r.driveAt):''}</td><td class="del" data-label=""><button class="d" onclick="del('${s}','${r.id}')">✕</button></td></tr>`).join('')||`<tr><td colspan="${c.f.length+5}" class="ts">No records yet.</td></tr>`}</table></div></div>`}
 async function add(s){const r={uid:U.uid,section:s,at:now(),ts:Date.now(),sync:'Saved'};let any=false;
 for(const f of S[s].f){const v=$('f_'+f[0]).value.trim();r[f[0]]=v;if(v&&f[2]!='sel')any=true;
 if(f[2]=='num'&&v&&(v.length<f[3][0]||v.length>f[3][1]))return alert(f[1]+' must be '+(f[3][0]==f[3][1]?f[3][0]:f[3][0]+' to '+f[3][1])+' digits.')}
@@ -177,11 +177,15 @@ r.infoDate=$('f_infoDate').value;if(!r.infoDate)return alert('Please select the 
 if(!any)return alert('Please fill in at least one field.');if(s=='members')r.party=party;
 try{r.id=(await addDoc(collection(fs,'records'),r)).id}catch(e){return alert('Could not save. Please check your connection and try again.')}
 db[s].push(r);await logA(S[s].title,'Saved: '+(r.name||'record'));section(s)}
-async function upload(s){const p=db[s].filter(r=>(r.sync||'Saved')=='Saved'&&(s!='members'||r.party==party));
+async function upload(s){const p=db[s].filter(r=>r.sync!='Uploaded to Drive'&&(s!='members'||r.party==party));
 if(!p.length)return alert('No saved records are waiting to be uploaded.');
-try{await Promise.all(p.map(r=>updateDoc(doc(fs,'records',r.id),{sync:'Pending Drive upload'})))}catch(e){return alert('Could not update. Please try again.')}
-p.forEach(r=>r.sync='Pending Drive upload');await logA(S[s].title,'Upload requested: '+p.length+' record(s)');section(s);
-alert('Google Drive is not connected yet, so nothing was uploaded. '+p.length+' record(s) are marked "Pending Drive upload" and will be sent to Drive once the Drive upload is connected.')}
+const bt=document.activeElement;if(bt&&bt.tagName=='BUTTON'){bt.disabled=true;bt.textContent='⏳ Uploading…'}
+try{const t=await U.getIdToken();
+const res=await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify({section:S[s].title,party:s=='members'?party:'',cols:S[s].f.map(f=>f[1]).concat(['Info Date','Saved On']),rows:p.map(r=>S[s].f.map(f=>r[f[0]]||'').concat([(r.infoDate||'').replace('T',' '),r.at||'']))})});
+const j=await res.json().catch(()=>({}));if(!res.ok)throw new Error(j.error||'Upload failed ('+res.status+')');
+const up=now();await Promise.all(p.map(r=>updateDoc(doc(fs,'records',r.id),{sync:'Uploaded to Drive',driveAt:up})));
+p.forEach(r=>{r.sync='Uploaded to Drive';r.driveAt=up});await logA(S[s].title,'Uploaded to Drive: '+p.length+' record(s)');section(s);
+alert(p.length+' record(s) uploaded to Google Drive.')}catch(e){section(s);alert('Upload failed: '+e.message)}}
 async function del(s,id){if(!confirm('Are you sure you want to delete this record?'))return;
 try{await deleteDoc(doc(fs,'records',id))}catch(e){return alert('Could not delete. Please try again.')}
 db[s]=db[s].filter(r=>r.id!=id);await logA(S[s].title,'Deleted record');section(s)}

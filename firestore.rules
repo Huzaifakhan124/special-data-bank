@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Admin = this exact email AND the email must be verified.
+    // (To change the admin, change the email here AND in index.html, then Publish.)
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'specialbranchh007@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+    function signedIn() { return request.auth != null; }
+    function isApproved() {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved';
+    }
+
+    // One profile per user. Users cannot change their own status.
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if signedIn() && request.auth.uid == uid
+        && (request.resource.data.status == 'pending' || isAdmin());
+      allow update: if isAdmin()
+        || (signedIn() && request.auth.uid == uid
+            && request.resource.data.status == resource.data.status);
+      allow delete: if isAdmin();
+    }
+
+    // Records (parties, sources, reports, officials, activity log).
+    // Approved users can only touch their own records.
+    match /records/{id} {
+      allow read: if (isApproved() && resource.data.uid == request.auth.uid) || isAdmin();
+      allow create: if isApproved() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if isApproved() && resource.data.uid == request.auth.uid;
+    }
+  }
+}
